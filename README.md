@@ -68,7 +68,5 @@ bash run_wikizsl.sh
 bash run_inference.sh
 ```
 
-## Acknowledgement
 
-Our implementation and experiments are based on the codes from [ZS-BERT](https://github.com/dinobby/ZS-BERT), we appreciate their open-resourced codes.
 
