@@ -17,7 +17,7 @@ def extract_entity(sequence_output, e_mask):
     return extended_e_mask.float()
 
 
-
+# class REMatchingModel(nn.Module):
 class TGCRE(BertPreTrainedModel):
     def __init__(self, config):
         super().__init__(config)
@@ -26,7 +26,7 @@ class TGCRE(BertPreTrainedModel):
         self.margin = torch.tensor(config.margin)
         self.alpha = config.alpha
         self.softmax=nn.Softmax(dim=-1)
-        self.q_grad = nn.Parameter(torch.randn(1, config.maxlen)) #nn.Parameter(torch.empty(1, config.maxlen))
+        self.q_grad = nn.Parameter(torch.empty(1, config.maxlen))
         nn.init.xavier_normal_(self.q_grad)
 
         self.p1 = nn.Parameter(torch.randn(3, 3)) #,requires_grad=False
@@ -75,10 +75,8 @@ class TGCRE(BertPreTrainedModel):
         mloss = torch.tensor(0.).cuda()
         if labels is not None:
             token_embeds = torch.tensor(sequence_output, requires_grad=True)
-
             x = torch.mean(torch.logsumexp(token_embeds, 1))
             x.backward()
-
             # token_embedss=torch.logsumexp(token_embeds, 1)  #torch.logsumexp(sequence_output, 1)
             # token_embedss_logits = self.classifier_grad(token_embedss)
             # token_embedss_loss = self.rev_loss(token_embedss_logits.view(-1, self.num_labels), labels.view(-1))
@@ -98,7 +96,6 @@ class TGCRE(BertPreTrainedModel):
             scores = torch.cosine_similarity(embeddings_grad, embeddings_q)
             score = torch.sum(scores, dim=-1)/ sequence_output.size(0)
 
-            # embeddings_context = embeddings_grad
 
 
         else:
@@ -106,7 +103,6 @@ class TGCRE(BertPreTrainedModel):
             q_mat = self.q_grad.repeat(sequence_output.size(0), 1, 1)
             embeddings_q = torch.matmul(q_mat, sequence_output).squeeze()
 
-            # embeddings_context = embeddings_q
             # embeddings_q = self.fclayer(embeddings_q)
 
         # print(1)
@@ -159,24 +155,18 @@ class TGCRE(BertPreTrainedModel):
                 # print(torch.inverse(self.p1))
                 # print(self.p1.transpose(0,1))
                 Mat_A = torch.stack((b[0], b[1], b[2]))
-                Mat_B = torch.matmul(self.p1, Mat_A)
-                Mat_C = torch.matmul(Mat_A,self.p2)
-                # Mat_B = torch.matmul(mid, self.p2)
+                mid = torch.matmul(self.p1, Mat_A)
+                Mat_B = torch.matmul(mid, self.p2)
 
 
 
                 A = torch.stack((matched_sentence_pair,matched_head_pair,matched_tail_pair))
-                B = torch.matmul(self.p1, A)
-                C = torch.matmul(A,self.p2)
-                # B = torch.matmul(mid_mat, self.p2)
+                mid_mat = torch.matmul(self.p1, A)
+                B = torch.matmul(mid_mat, self.p2)
 
                 B_sentence_pair = B[0]
                 B_head_pair = B[1]
                 B_tail_pair = B[2]
-
-                C_sentence_pair = C[0]
-                C_head_pair = C[1]
-                C_tail_pair = C[2]
 
                 ###################################################################
 
@@ -208,14 +198,7 @@ class TGCRE(BertPreTrainedModel):
                 pos_t1 = torch.cosine_similarity(B_tail_pair, Mat_B[2], dim=-1).max().cuda()
                 pos_B = (1 - 2 * self.alpha) * pos_s1 + self.alpha * pos_h1 + self.alpha * pos_t1
 
-                pos_s2 = torch.cosine_similarity(C_sentence_pair, Mat_C[0], dim=-1).cuda()
-                pos_h2 = torch.cosine_similarity(C_head_pair, Mat_C[1], dim=-1).max().cuda()
-                pos_t2 = torch.cosine_similarity(C_tail_pair, Mat_C[2], dim=-1).max().cuda()
-                pos_C = (1 - 2 * self.alpha) * pos_s2 + self.alpha * pos_h2 + self.alpha * pos_t2
-
-
-
-                pos = (pos_A + pos_B+ pos_C)/3
+                pos = (pos_A + pos_B)/2
                 ########################  修改    ###########################################
                 # context_describe = input_relation_emb[a]
                 # head_describe = input_relation_head_emb[a]
@@ -265,14 +248,13 @@ class TGCRE(BertPreTrainedModel):
                     #         max_val = tmp
                     ########################  修改    #################################################################
                     A_neg = torch.stack((j[0],j[1],j[2]))
-                    B_neg = torch.matmul(self.p1, A_neg)
-                    C_neg = torch.matmul(A_neg,self.p2)
-                    # B_neg = torch.matmul(mid_mat_neg, self.p2)
+                    mid_mat_neg = torch.matmul(self.p1, A_neg)
+                    B_neg = torch.matmul(mid_mat_neg, self.p2)
 
 
-                    tmp_s = torch.cosine_similarity(Mat_A[0], A_neg[0], dim=-1).cuda()
-                    tmp_h = torch.cosine_similarity(Mat_A[1], A_neg[1], dim=-1).max().cuda()
-                    tmp_t = torch.cosine_similarity(Mat_A[2], A_neg[2], dim=-1).max().cuda()
+                    tmp_s = torch.cosine_similarity(Mat_A[0], j[0], dim=-1).cuda()
+                    tmp_h = torch.cosine_similarity(Mat_A[1], j[1], dim=-1).max().cuda()
+                    tmp_t = torch.cosine_similarity(Mat_A[2], j[2], dim=-1).max().cuda()
                     tmp_A = (1 - 2 * self.alpha) * tmp_s + self.alpha * tmp_h + self.alpha * tmp_t
 
                     tmp_s1 = torch.cosine_similarity(Mat_B[0], B_neg[0], dim=-1).cuda()
@@ -280,12 +262,7 @@ class TGCRE(BertPreTrainedModel):
                     tmp_t1 = torch.cosine_similarity(Mat_B[2], B_neg[2], dim=-1).max().cuda()
                     tmp_B = (1 - 2 * self.alpha) * tmp_s1 + self.alpha * tmp_h1 + self.alpha * tmp_t1
 
-                    tmp_s2 = torch.cosine_similarity(Mat_C[0], C_neg[0], dim=-1).cuda()
-                    tmp_h2 = torch.cosine_similarity(Mat_C[1], C_neg[1], dim=-1).max().cuda()
-                    tmp_t2 = torch.cosine_similarity(Mat_C[2], C_neg[2], dim=-1).max().cuda()
-                    tmp_C = (1 - 2 * self.alpha) * tmp_s2 + self.alpha * tmp_h2 + self.alpha * tmp_t2
-
-                    tmp = (tmp_A + tmp_B + tmp_C)/3
+                    tmp = (tmp_A + tmp_B)/2
 
                     if tmp > max_val:
                         if (matched_sentence_pair == j[0]).all():
